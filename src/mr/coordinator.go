@@ -15,6 +15,13 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
+func DPrint(v ...interface{}) (n int, err error) {
+	if Debug {
+		log.Print(v...)
+	}
+	return
+}
+
 type Coordinator struct {
 	// Your definitions here.
 	files []string

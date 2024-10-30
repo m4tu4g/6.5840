@@ -1,6 +1,11 @@
 package mr
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"os"
+)
 import "log"
 import "net/rpc"
 import "hash/fnv"
@@ -20,11 +25,12 @@ func ihash(key string) int {
 }
 
 // main/mrworker.go calls this function.
-func Worker(mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string) {
+func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
 
 	// Your worker implementation here.
-	GetMapTask()
+	if filename := GetMapTask(); filename != "" {
+		MapWorker(mapf, filename)
+	}
 
 	// uncomment to send the Example RPC to the coordinator.
 	// CallExample()
@@ -79,25 +85,64 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	return false
 }
 
-func MapWorker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
+func MapWorker(mapf func(string, string) []KeyValue, filename string) {
+	kva := GetIntermediatePairs(mapf, filename)
 
+	// test with mr-X-Y
+	interFilename := "mr-X-Y"
+	interFile, err := os.Create(interFilename)
+	if err != nil {
+		log.Fatal("os.Create", err)
+	}
+	defer interFile.Close()
+
+	enc := json.NewEncoder(interFile)
+	for _, kv := range kva {
+		err := enc.Encode(&kv)
+		if err != nil {
+			log.Fatalf("cannot encode %v", interFilename)
+		}
+	}
 }
 
 func ReduceWorker(mapf func(string, []string) string, reducef func(string, []string) string) {
 
 }
 
-func GetMapTask() {
+func GetMapTask() string {
 	reply := GetMapTaskReply{}
 
 	ok := call("Coordinator.GetMapTask", GetMapTaskArgs{}, &reply)
 	if ok {
 		if reply.Filename != "" {
-			fmt.Printf("Got file %v\n", reply.Filename)
+			fmt.Printf("Got file %v, starting map task\n", reply.Filename)
 		} else {
 			fmt.Printf("No files atm\n")
 		}
-	} else {
-		DPrintf("call failed!\n")
+		return reply.Filename
 	}
+
+	DPrintf("call failed!\n")
+	return ""
+}
+
+func GetIntermediatePairs(mapf func(string, string) []KeyValue, filename string) []KeyValue {
+	file, err := os.Open(filename)
+	defer file.Close()
+	if err != nil {
+		log.Fatalf("cannot open %v", filename)
+	}
+
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Fatalf("cannot read %v", filename)
+	}
+
+	kva := mapf(filename, string(content))
+	DPrint("GetIntermediatePairs", len(kva), kva[0])
+	return kva
+}
+
+func InformMapTaskCompletion(intermediateFiles []string) error {
+	return nil
 }
