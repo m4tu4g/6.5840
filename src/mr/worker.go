@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strconv"
 )
 import "log"
 import "net/rpc"
@@ -28,13 +29,12 @@ func ihash(key string) int {
 func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
 
 	// Your worker implementation here.
-	if filename := GetMapTask(); filename != "" {
-		MapWorker(mapf, filename)
+	if filename, nReduce := GetMapTask(); filename != "" {
+		MapWorker(mapf, filename, nReduce)
 	}
 
 	// uncomment to send the Example RPC to the coordinator.
 	// CallExample()
-
 }
 
 // example function to show how to make an RPC call to the coordinator.
@@ -85,45 +85,38 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	return false
 }
 
-func MapWorker(mapf func(string, string) []KeyValue, filename string) {
+func MapWorker(mapf func(string, string) []KeyValue, filename string, nReduce int) {
 	kva := GetIntermediatePairs(mapf, filename)
 
-	// test with mr-X-Y
-	interFilename := "mr-X-Y"
-	interFile, err := os.Create(interFilename)
-	if err != nil {
-		log.Fatal("os.Create", err)
-	}
-	defer interFile.Close()
-
-	enc := json.NewEncoder(interFile)
 	for _, kv := range kva {
-		err := enc.Encode(&kv)
-		if err != nil {
-			log.Fatalf("cannot encode %v", interFilename)
-		}
+		Y := ihash(kv.Key) % nReduce
+		intermediateFilename := "mr-X-" + strconv.Itoa(Y)
+		PutKvInIntermediateFile(kv, intermediateFilename)
 	}
+
 }
 
 func ReduceWorker(mapf func(string, []string) string, reducef func(string, []string) string) {
 
 }
 
-func GetMapTask() string {
+func GetMapTask() (string, int) {
+	args := GetMapTaskArgs{}
 	reply := GetMapTaskReply{}
 
-	ok := call("Coordinator.GetMapTask", GetMapTaskArgs{}, &reply)
+	ok := call("Coordinator.GetMapTask", &args, &reply)
 	if ok {
 		if reply.Filename != "" {
 			fmt.Printf("Got file %v, starting map task\n", reply.Filename)
 		} else {
 			fmt.Printf("No files atm\n")
 		}
-		return reply.Filename
+		DPrint(reply)
+		return reply.Filename, reply.NReduce
 	}
 
 	DPrintf("call failed!\n")
-	return ""
+	return "", 0
 }
 
 func GetIntermediatePairs(mapf func(string, string) []KeyValue, filename string) []KeyValue {
@@ -145,4 +138,18 @@ func GetIntermediatePairs(mapf func(string, string) []KeyValue, filename string)
 
 func InformMapTaskCompletion(intermediateFiles []string) error {
 	return nil
+}
+
+func PutKvInIntermediateFile(kv KeyValue, file string) {
+	intermediateFile, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatal("os.OpenFile", err)
+	}
+	defer intermediateFile.Close()
+
+	enc := json.NewEncoder(intermediateFile)
+	err = enc.Encode(&kv)
+	if err != nil {
+		log.Fatalf("cannot encode %v", file)
+	}
 }

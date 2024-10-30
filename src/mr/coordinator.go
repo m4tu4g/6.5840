@@ -1,6 +1,8 @@
 package mr
 
-import "log"
+import (
+	"log"
+)
 import "net"
 import "os"
 import "net/rpc"
@@ -24,7 +26,8 @@ func DPrint(v ...interface{}) (n int, err error) {
 
 type Coordinator struct {
 	// Your definitions here.
-	files []string
+	files   []string
+	NReduce int // nReduce, making in upper for public access
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -37,7 +40,7 @@ func (c *Coordinator) GetMapTask(args *GetMapTaskArgs, reply *GetMapTaskReply) e
 	} else {
 		DPrintf("No files to send")
 	}
-	reply.Filename = f
+	reply.Filename, reply.NReduce = f, c.NReduce
 	return nil
 }
 
@@ -82,6 +85,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	// Your code here.
 	c.files = files
+	c.NReduce = nReduce
 
 	c.server()
 	return &c
