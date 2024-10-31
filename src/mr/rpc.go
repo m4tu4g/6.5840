@@ -26,6 +26,11 @@ type ExampleReply struct {
 
 // Add your RPC definitions here.
 
+const (
+	ShutDownAction = "shut down"
+	GetTaskAction  = "get task"
+)
+
 type GetMapTaskArgs struct {
 }
 
@@ -33,6 +38,15 @@ type GetMapTaskReply struct {
 	Filename  string
 	NReduce   int // nReduce, making in upper for public access
 	MapTaskID int
+}
+
+type InformMapTaskResultArgs struct {
+	TaskID                int
+	IntermediateFileNames []string
+}
+
+type InformMapTaskResultReply struct {
+	Action string
 }
 
 // Cook up a unique-ish UNIX-domain socket name

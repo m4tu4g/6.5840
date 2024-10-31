@@ -35,26 +35,26 @@ type Coordinator struct {
 // Your code here -- RPC handlers for the worker to call.
 
 func (c *Coordinator) GetMapTask(args *GetMapTaskArgs, reply *GetMapTaskReply) error {
-	var currFile string
-	var mapTaskId int
 
-	// should be in mutex lock
-
-	if len(c.pendingMapTasks) > 0 {
-		for id, fileName := range c.pendingMapTasks {
-			mapTaskId, currFile = id, fileName
-			break
-		}
-		delete(c.pendingMapTasks, mapTaskId)
-		c.runningMapTasks[mapTaskId] = currFile
-		DPrintf("sent file %s\n", currFile)
-	} else {
-		DPrintf("no files to send")
-	}
+	currFile, mapTaskId := c.getPendingTask()
 
 	reply.Filename = currFile
 	reply.NReduce = c.nReduce
 	reply.MapTaskID = mapTaskId
+	return nil
+}
+
+func (c *Coordinator) InformMapTaskResult(args *InformMapTaskResultArgs, reply *InformMapTaskResultReply) error {
+
+	// in a mutex
+	c.completedMapTasks[args.TaskID] = args.IntermediateFileNames
+	delete(c.runningMapTasks, args.TaskID)
+	if c.checkForPendingTask() {
+		reply.Action = GetTaskAction
+	} else {
+		reply.Action = ShutDownAction
+	}
+
 	return nil
 }
 
@@ -89,6 +89,37 @@ func (c *Coordinator) Done() bool {
 	// Your code here.
 
 	return ret
+}
+
+func (c *Coordinator) getPendingTask() (string, int) {
+	var currFile string
+	var mapTaskId int
+
+	// should be in mutex lock
+
+	DPrint("pending tasks ", c.pendingMapTasks)
+	DPrint("running tasks ", c.runningMapTasks)
+	DPrint("completed tasks ", c.completedMapTasks)
+
+	if len(c.pendingMapTasks) > 0 {
+		for id, fileName := range c.pendingMapTasks {
+			mapTaskId, currFile = id, fileName
+			break
+		}
+		delete(c.pendingMapTasks, mapTaskId)
+		c.runningMapTasks[mapTaskId] = currFile
+		DPrintf("sent task %d with file %s\n", mapTaskId, currFile)
+		return currFile, mapTaskId
+	} else {
+		return currFile, -1
+	}
+
+}
+
+func (c *Coordinator) checkForPendingTask() bool {
+
+	// handle with mutex
+	return len(c.pendingMapTasks) > 0
 }
 
 // create a Coordinator.

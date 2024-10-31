@@ -28,10 +28,7 @@ func ihash(key string) int {
 func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
 
 	// Your worker implementation here.
-	filename, nReduce, mapTaskID := GetMapTask()
-	if filename != "" {
-		MapWorker(mapf, filename, nReduce, mapTaskID)
-	}
+	MapWorker(mapf)
 
 	// uncomment to send the Example RPC to the coordinator.
 	// CallExample()
@@ -85,14 +82,35 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	return false
 }
 
-func MapWorker(mapf func(string, string) []KeyValue, filename string, nReduce int, mapTaskId int) {
+func MapWorker(mapf func(string, string) []KeyValue) {
+
+	filename, nReduce, mapTaskId := GetMapTask()
+	if filename == "" {
+		DPrint("no split received, shutting down")
+		return
+	}
+
 	kva := GetIntermediatePairs(mapf, filename)
 
+	intermediateFileNames := make(map[string]bool)
+	DPrint("processing ", mapTaskId, filename)
 	for _, kv := range kva {
 		Y := ihash(kv.Key) % nReduce
 		intermediateFilename := fmt.Sprintf("map-%d-%d", mapTaskId, Y)
 		PutKvInIntermediateFile(kv, intermediateFilename)
+		intermediateFileNames[intermediateFilename] = true
 	}
+
+	// convert map's keys into array
+	intermediateFileNamesArray := make([]string, len(intermediateFileNames))
+	i := 0
+	for k := range intermediateFileNames {
+		intermediateFileNamesArray[i] = k
+		i++
+	}
+
+	// handle multiple inform retries exponentially later
+	InformMapTaskResult(mapTaskId, intermediateFileNamesArray, mapf)
 
 }
 
@@ -115,7 +133,7 @@ func GetMapTask() (string, int, int) {
 		return reply.Filename, reply.NReduce, reply.MapTaskID
 	}
 
-	DPrintf("call failed!\n")
+	DPrint("GetMapTask call failed!")
 	return "", 0, -1
 }
 
@@ -132,11 +150,27 @@ func GetIntermediatePairs(mapf func(string, string) []KeyValue, filename string)
 	}
 
 	kva := mapf(filename, string(content))
-	DPrint("GetIntermediatePairs", len(kva), kva[0])
+	DPrint("GetIntermediatePairs ", len(kva), kva[0])
 	return kva
 }
 
-func InformMapTaskCompletion(intermediateFiles []string) error {
+func InformMapTaskResult(mapTaskId int, intermediateFiles []string, mapf func(string, string) []KeyValue) error {
+	args := InformMapTaskResultArgs{
+		mapTaskId,
+		intermediateFiles,
+	}
+	reply := InformMapTaskResultReply{}
+
+	ok := call("Coordinator.InformMapTaskResult", &args, &reply)
+	if ok {
+		if reply.Action == GetTaskAction {
+			MapWorker(mapf)
+		} else if reply.Action == ShutDownAction {
+			DPrint("shut down action received")
+		}
+	} else {
+		DPrint("InformMapTaskResult call failed!")
+	}
 	return nil
 }
 
