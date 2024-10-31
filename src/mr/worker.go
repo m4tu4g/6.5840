@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"strconv"
 )
 import "log"
 import "net/rpc"
@@ -29,8 +28,9 @@ func ihash(key string) int {
 func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
 
 	// Your worker implementation here.
-	if filename, nReduce := GetMapTask(); filename != "" {
-		MapWorker(mapf, filename, nReduce)
+	filename, nReduce, mapTaskID := GetMapTask()
+	if filename != "" {
+		MapWorker(mapf, filename, nReduce, mapTaskID)
 	}
 
 	// uncomment to send the Example RPC to the coordinator.
@@ -85,12 +85,12 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	return false
 }
 
-func MapWorker(mapf func(string, string) []KeyValue, filename string, nReduce int) {
+func MapWorker(mapf func(string, string) []KeyValue, filename string, nReduce int, mapTaskId int) {
 	kva := GetIntermediatePairs(mapf, filename)
 
 	for _, kv := range kva {
 		Y := ihash(kv.Key) % nReduce
-		intermediateFilename := "mr-X-" + strconv.Itoa(Y)
+		intermediateFilename := fmt.Sprintf("map-%d-%d", mapTaskId, Y)
 		PutKvInIntermediateFile(kv, intermediateFilename)
 	}
 
@@ -100,7 +100,7 @@ func ReduceWorker(mapf func(string, []string) string, reducef func(string, []str
 
 }
 
-func GetMapTask() (string, int) {
+func GetMapTask() (string, int, int) {
 	args := GetMapTaskArgs{}
 	reply := GetMapTaskReply{}
 
@@ -112,11 +112,11 @@ func GetMapTask() (string, int) {
 			fmt.Printf("No files atm\n")
 		}
 		DPrint(reply)
-		return reply.Filename, reply.NReduce
+		return reply.Filename, reply.NReduce, reply.MapTaskID
 	}
 
 	DPrintf("call failed!\n")
-	return "", 0
+	return "", 0, -1
 }
 
 func GetIntermediatePairs(mapf func(string, string) []KeyValue, filename string) []KeyValue {

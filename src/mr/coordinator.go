@@ -26,21 +26,35 @@ func DPrint(v ...interface{}) (n int, err error) {
 
 type Coordinator struct {
 	// Your definitions here.
-	files   []string
-	NReduce int // nReduce, making in upper for public access
+	nReduce           int
+	pendingMapTasks   map[int]string   // id: file name
+	runningMapTasks   map[int]string   // id: file name
+	completedMapTasks map[int][]string // id: intermediate file names
 }
 
 // Your code here -- RPC handlers for the worker to call.
 
 func (c *Coordinator) GetMapTask(args *GetMapTaskArgs, reply *GetMapTaskReply) error {
-	var f string
-	if len(c.files) > 0 {
-		f, c.files = c.files[0], c.files[1:]
-		DPrintf("Sent file %s\n", f)
+	var currFile string
+	var mapTaskId int
+
+	// should be in mutex lock
+
+	if len(c.pendingMapTasks) > 0 {
+		for id, fileName := range c.pendingMapTasks {
+			mapTaskId, currFile = id, fileName
+			break
+		}
+		delete(c.pendingMapTasks, mapTaskId)
+		c.runningMapTasks[mapTaskId] = currFile
+		DPrintf("sent file %s\n", currFile)
 	} else {
-		DPrintf("No files to send")
+		DPrintf("no files to send")
 	}
-	reply.Filename, reply.NReduce = f, c.NReduce
+
+	reply.Filename = currFile
+	reply.NReduce = c.nReduce
+	reply.MapTaskID = mapTaskId
 	return nil
 }
 
@@ -81,11 +95,18 @@ func (c *Coordinator) Done() bool {
 // main/mrcoordinator.go calls this function.
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
-	c := Coordinator{}
 
 	// Your code here.
-	c.files = files
-	c.NReduce = nReduce
+	c := Coordinator{
+		nReduce:           nReduce,
+		pendingMapTasks:   make(map[int]string),
+		runningMapTasks:   make(map[int]string),
+		completedMapTasks: make(map[int][]string),
+	}
+
+	for idx, fileNames := range files {
+		c.pendingMapTasks[idx] = fileNames
+	}
 
 	c.server()
 	return &c

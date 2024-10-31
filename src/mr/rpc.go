@@ -30,8 +30,9 @@ type GetMapTaskArgs struct {
 }
 
 type GetMapTaskReply struct {
-	Filename string
-	NReduce  int // nReduce, making in upper for public access
+	Filename  string
+	NReduce   int // nReduce, making in upper for public access
+	MapTaskID int
 }
 
 // Cook up a unique-ish UNIX-domain socket name
