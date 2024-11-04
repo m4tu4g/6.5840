@@ -26,9 +26,18 @@ type ExampleReply struct {
 
 // Add your RPC definitions here.
 
+// actions
 const (
-	ShutDownAction = "shut down"
-	GetTaskAction  = "get task"
+	ShutDownAction      = "shut down"
+	GetMapTaskAction    = "get task"
+	GetReduceTaskAction = "get reduce"
+)
+
+// phases
+const (
+	MapPhase    = "map phase"
+	SortPhase   = "sort phase"
+	ReducePhase = "reduce phase"
 )
 
 type GetMapTaskArgs struct {
@@ -36,7 +45,7 @@ type GetMapTaskArgs struct {
 
 type GetMapTaskReply struct {
 	Filename  string
-	NReduce   int // nReduce, making in upper for public access
+	NReduce   int // nReduce, making in upper for RPC (public?) access
 	MapTaskID int
 }
 

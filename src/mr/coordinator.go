@@ -26,17 +26,22 @@ func DPrint(v ...interface{}) (n int, err error) {
 
 type Coordinator struct {
 	// Your definitions here.
-	nReduce           int
-	pendingMapTasks   map[int]string   // id: file name
-	runningMapTasks   map[int]string   // id: file name
-	completedMapTasks map[int][]string // id: intermediate file names
+	inputSplits          []string
+	nReduce              int
+	currPhase            string
+	pendingMapTasks      map[int]string   // map task's id: input split file name
+	runningMapTasks      map[int]string   // map task's id: input split file name
+	completedMapTasks    map[int][]string // map task's id: intermediate file names
+	pendingReduceTasks   map[int][]string // reduce task's id: (sorted) intermediate file names
+	runningReduceTasks   map[int][]string // reduce task's id: (sorted) intermediate file names
+	completedReduceTasks map[int]string   // reduce task's id: output file name
 }
 
 // Your code here -- RPC handlers for the worker to call.
 
 func (c *Coordinator) GetMapTask(args *GetMapTaskArgs, reply *GetMapTaskReply) error {
 
-	currFile, mapTaskId := c.getPendingTask()
+	currFile, mapTaskId := c.getPendingMapTask()
 
 	reply.Filename = currFile
 	reply.NReduce = c.nReduce
@@ -49,8 +54,8 @@ func (c *Coordinator) InformMapTaskResult(args *InformMapTaskResultArgs, reply *
 	// in a mutex
 	c.completedMapTasks[args.TaskID] = args.IntermediateFileNames
 	delete(c.runningMapTasks, args.TaskID)
-	if c.checkForPendingTask() {
-		reply.Action = GetTaskAction
+	if c.checkForPendingMapTask() {
+		reply.Action = GetMapTaskAction
 	} else {
 		reply.Action = ShutDownAction
 	}
@@ -84,22 +89,18 @@ func (c *Coordinator) server() {
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
-	ret := false
-
-	// Your code here.
-
-	return ret
+	return len(c.completedReduceTasks) == c.nReduce
 }
 
-func (c *Coordinator) getPendingTask() (string, int) {
+func (c *Coordinator) getPendingMapTask() (string, int) {
 	var currFile string
 	var mapTaskId int
 
 	// should be in mutex lock
 
-	DPrint("pending tasks ", c.pendingMapTasks)
-	DPrint("running tasks ", c.runningMapTasks)
-	DPrint("completed tasks ", c.completedMapTasks)
+	DPrint("pending map tasks ", c.pendingMapTasks)
+	DPrint("running map tasks ", c.runningMapTasks)
+	DPrint("completed map tasks ", c.completedMapTasks)
 
 	if len(c.pendingMapTasks) > 0 {
 		for id, fileName := range c.pendingMapTasks {
@@ -116,11 +117,17 @@ func (c *Coordinator) getPendingTask() (string, int) {
 
 }
 
-func (c *Coordinator) checkForPendingTask() bool {
+func (c *Coordinator) checkForPendingMapTask() bool {
 
 	// handle with mutex
 	return len(c.pendingMapTasks) > 0
 }
+
+func (c *Coordinator) areMapTasksCompleted() bool {
+	return len(c.completedMapTasks) == len(c.inputSplits)
+}
+
+func (c *Coordinator) check() {}
 
 // create a Coordinator.
 // main/mrcoordinator.go calls this function.
@@ -129,7 +136,9 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	// Your code here.
 	c := Coordinator{
+		inputSplits:       files,
 		nReduce:           nReduce,
+		currPhase:         MapPhase,
 		pendingMapTasks:   make(map[int]string),
 		runningMapTasks:   make(map[int]string),
 		completedMapTasks: make(map[int][]string),

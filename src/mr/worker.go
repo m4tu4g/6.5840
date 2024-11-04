@@ -163,7 +163,7 @@ func InformMapTaskResult(mapTaskId int, intermediateFiles []string, mapf func(st
 
 	ok := call("Coordinator.InformMapTaskResult", &args, &reply)
 	if ok {
-		if reply.Action == GetTaskAction {
+		if reply.Action == GetMapTaskAction {
 			MapWorker(mapf)
 		} else if reply.Action == ShutDownAction {
 			DPrint("shut down action received")
