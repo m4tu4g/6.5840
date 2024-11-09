@@ -28,7 +28,14 @@ func ihash(key string) int {
 func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
 
 	// Your worker implementation here.
-	MapWorker(mapf)
+	for filename, nReduce, mapTaskId := GetMapTask(); filename != ""; {
+		MapWorker(mapf, filename, nReduce, mapTaskId)
+		filename, nReduce, mapTaskId = GetMapTask()
+	}
+	//for ReduceWorker(reducef) != ShutDownAction {
+	//}
+
+	DPrint("All tasks completed, shutting down ....")
 
 	// uncomment to send the Example RPC to the coordinator.
 	// CallExample()
@@ -82,40 +89,27 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	return false
 }
 
-func MapWorker(mapf func(string, string) []KeyValue) {
+func MapWorker(mapf func(string, string) []KeyValue, filename string, nReduce int, mapTaskId int) string {
 
-	filename, nReduce, mapTaskId := GetMapTask()
 	if filename == "" {
 		DPrint("no split received, shutting down")
-		return
+		return ShutDownAction
 	}
 
 	kva := GetIntermediatePairs(mapf, filename)
 
-	intermediateFileNames := make(map[string]bool)
-	DPrint("processing ", mapTaskId, filename)
+	intermediateFileNames := make(map[string]int)
+	DPrint("processing ", mapTaskId, " ", filename)
 	for _, kv := range kva {
 		Y := ihash(kv.Key) % nReduce
-		intermediateFilename := fmt.Sprintf("map-%d-%d", mapTaskId, Y)
+		intermediateFilename := fmt.Sprintf("mr-%d-%d", mapTaskId, Y)
 		PutKvInIntermediateFile(kv, intermediateFilename)
-		intermediateFileNames[intermediateFilename] = true
-	}
-
-	// convert map's keys into array
-	intermediateFileNamesArray := make([]string, len(intermediateFileNames))
-	i := 0
-	for k := range intermediateFileNames {
-		intermediateFileNamesArray[i] = k
-		i++
+		intermediateFileNames[intermediateFilename] = Y
 	}
 
 	// handle multiple inform retries exponentially later
-	InformMapTaskResult(mapTaskId, intermediateFileNamesArray, mapf)
-
-}
-
-func ReduceWorker(mapf func(string, []string) string, reducef func(string, []string) string) {
-
+	result, _ := InformMapTaskResult(mapTaskId, intermediateFileNames)
+	return result
 }
 
 func GetMapTask() (string, int, int) {
@@ -129,7 +123,7 @@ func GetMapTask() (string, int, int) {
 		} else {
 			fmt.Printf("No files atm\n")
 		}
-		DPrint(reply)
+		//DPrint(reply)
 		return reply.Filename, reply.NReduce, reply.MapTaskID
 	}
 
@@ -150,11 +144,14 @@ func GetIntermediatePairs(mapf func(string, string) []KeyValue, filename string)
 	}
 
 	kva := mapf(filename, string(content))
-	DPrint("GetIntermediatePairs ", len(kva), kva[0])
+	//DPrint("GetIntermediatePairs ", len(kva), kva[0])
 	return kva
 }
 
-func InformMapTaskResult(mapTaskId int, intermediateFiles []string, mapf func(string, string) []KeyValue) error {
+func InformMapTaskResult(
+	mapTaskId int,
+	intermediateFiles map[string]int,
+) (string, error) {
 	args := InformMapTaskResultArgs{
 		mapTaskId,
 		intermediateFiles,
@@ -163,15 +160,11 @@ func InformMapTaskResult(mapTaskId int, intermediateFiles []string, mapf func(st
 
 	ok := call("Coordinator.InformMapTaskResult", &args, &reply)
 	if ok {
-		if reply.Action == GetMapTaskAction {
-			MapWorker(mapf)
-		} else if reply.Action == ShutDownAction {
-			DPrint("shut down action received")
-		}
+		return reply.Action, nil
 	} else {
 		DPrint("InformMapTaskResult call failed!")
+		return "", nil
 	}
-	return nil
 }
 
 func PutKvInIntermediateFile(kv KeyValue, file string) {
@@ -186,4 +179,8 @@ func PutKvInIntermediateFile(kv KeyValue, file string) {
 	if err != nil {
 		log.Fatalf("cannot encode %v", file)
 	}
+}
+
+func ReduceWorker(reducef func(string, []string) string) {
+
 }

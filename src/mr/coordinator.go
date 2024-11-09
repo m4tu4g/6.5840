@@ -32,7 +32,7 @@ type Coordinator struct {
 	pendingMapTasks      map[int]string   // map task's id: input split file name
 	runningMapTasks      map[int]string   // map task's id: input split file name
 	completedMapTasks    map[int][]string // map task's id: intermediate file names
-	pendingReduceTasks   map[int][]string // reduce task's id: (sorted) intermediate file names
+	pendingReduceTasks   map[int][]string // reduce task's id: intermediate file names
 	runningReduceTasks   map[int][]string // reduce task's id: (sorted) intermediate file names
 	completedReduceTasks map[int]string   // reduce task's id: output file name
 }
@@ -52,9 +52,12 @@ func (c *Coordinator) GetMapTask(args *GetMapTaskArgs, reply *GetMapTaskReply) e
 func (c *Coordinator) InformMapTaskResult(args *InformMapTaskResultArgs, reply *InformMapTaskResultReply) error {
 
 	// in a mutex
-	c.completedMapTasks[args.TaskID] = args.IntermediateFileNames
+	for fileName, reduceTaskId := range args.IntermediateFileNames {
+		c.completedMapTasks[args.TaskID] = append(c.completedMapTasks[args.TaskID], fileName)
+		c.pendingReduceTasks[reduceTaskId] = append(c.pendingReduceTasks[reduceTaskId], fileName)
+	}
 	delete(c.runningMapTasks, args.TaskID)
-	if c.checkForPendingMapTask() {
+	if c.checkForMapTask() {
 		reply.Action = GetMapTaskAction
 	} else {
 		reply.Action = ShutDownAction
@@ -98,9 +101,10 @@ func (c *Coordinator) getPendingMapTask() (string, int) {
 
 	// should be in mutex lock
 
-	DPrint("pending map tasks ", c.pendingMapTasks)
+	//DPrint("pending map tasks ", c.pendingMapTasks)
 	DPrint("running map tasks ", c.runningMapTasks)
-	DPrint("completed map tasks ", c.completedMapTasks)
+	//DPrint("completed map tasks ", c.completedMapTasks)
+	//DPrint("pending reduce tasks ", c.pendingReduceTasks)
 
 	if len(c.pendingMapTasks) > 0 {
 		for id, fileName := range c.pendingMapTasks {
@@ -111,16 +115,29 @@ func (c *Coordinator) getPendingMapTask() (string, int) {
 		c.runningMapTasks[mapTaskId] = currFile
 		DPrintf("sent task %d with file %s\n", mapTaskId, currFile)
 		return currFile, mapTaskId
+	} else if len(c.runningMapTasks) > 0 {
+		for id, fileName := range c.runningMapTasks {
+			mapTaskId, currFile = id, fileName
+			break
+		}
+		DPrintf("sent (running) task %d with file %s\n", mapTaskId, currFile)
+		return currFile, mapTaskId
 	} else {
 		return currFile, -1
 	}
 
 }
 
-func (c *Coordinator) checkForPendingMapTask() bool {
+func (c *Coordinator) checkForMapTask() bool {
 
 	// handle with mutex
-	return len(c.pendingMapTasks) > 0
+	if len(c.pendingMapTasks) > 0 {
+		return true
+	} else if len(c.runningMapTasks) > 0 {
+		return true
+	}
+
+	return false
 }
 
 func (c *Coordinator) areMapTasksCompleted() bool {
@@ -136,12 +153,13 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	// Your code here.
 	c := Coordinator{
-		inputSplits:       files,
-		nReduce:           nReduce,
-		currPhase:         MapPhase,
-		pendingMapTasks:   make(map[int]string),
-		runningMapTasks:   make(map[int]string),
-		completedMapTasks: make(map[int][]string),
+		inputSplits:        files,
+		nReduce:            nReduce,
+		currPhase:          MapPhase,
+		pendingMapTasks:    make(map[int]string),
+		runningMapTasks:    make(map[int]string),
+		completedMapTasks:  make(map[int][]string),
+		pendingReduceTasks: make(map[int][]string),
 	}
 
 	for idx, fileNames := range files {

@@ -29,14 +29,13 @@ type ExampleReply struct {
 // actions
 const (
 	ShutDownAction      = "shut down"
-	GetMapTaskAction    = "get task"
-	GetReduceTaskAction = "get reduce"
+	GetMapTaskAction    = "get map task"
+	GetReduceTaskAction = "get reduce task"
 )
 
 // phases
 const (
 	MapPhase    = "map phase"
-	SortPhase   = "sort phase"
 	ReducePhase = "reduce phase"
 )
 
@@ -51,7 +50,7 @@ type GetMapTaskReply struct {
 
 type InformMapTaskResultArgs struct {
 	TaskID                int
-	IntermediateFileNames []string
+	IntermediateFileNames map[string]int
 }
 
 type InformMapTaskResultReply struct {
