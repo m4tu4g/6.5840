@@ -57,6 +57,23 @@ type InformMapTaskResultReply struct {
 	Action string
 }
 
+type GetReduceTaskArgs struct {
+}
+
+type GetReduceTaskReply struct {
+	Filenames    []string
+	ReduceTaskID int
+}
+
+type InformReduceTaskResultArgs struct {
+	TaskID         int
+	OutputFilename string
+}
+
+type InformReduceTaskResultReply struct {
+	Action string
+}
+
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.
 // Can't use the current directory since

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"sort"
 )
 import "log"
 import "net/rpc"
@@ -15,6 +16,14 @@ type KeyValue struct {
 	Key   string
 	Value string
 }
+
+// for sorting by key.
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 // use ihash(key) % NReduce to choose the reduce
 // task number for each KeyValue emitted by Map.
@@ -32,10 +41,13 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 		MapWorker(mapf, filename, nReduce, mapTaskId)
 		filename, nReduce, mapTaskId = GetMapTask()
 	}
-	//for ReduceWorker(reducef) != ShutDownAction {
-	//}
+	DPrint("all map tasks are completed")
 
-	DPrint("All tasks completed, shutting down ....")
+	for fileNames, reduceTaskId := GetReduceTask(); len(fileNames) > 0; {
+		ReduceWorker(reducef, fileNames, reduceTaskId)
+		fileNames, reduceTaskId = GetReduceTask()
+	}
+	DPrint("all reduce tasks completed")
 
 	// uncomment to send the Example RPC to the coordinator.
 	// CallExample()
@@ -181,6 +193,100 @@ func PutKvInIntermediateFile(kv KeyValue, file string) {
 	}
 }
 
-func ReduceWorker(reducef func(string, []string) string) {
+func ReduceWorker(reducef func(string, []string) string, fileNames []string, reduceTaskId int) string {
 
+	if len(fileNames) == 0 {
+		DPrint("no files received, shutting down")
+		return ShutDownAction
+	}
+
+	intermediate := make([]KeyValue, 0)
+
+	for _, fileName := range fileNames {
+		GetKVFromIntermediateFile(fileName, &intermediate)
+	}
+
+	// fill intermediates
+
+	sort.Sort(ByKey(intermediate))
+
+	oname := fmt.Sprintf("mr-out-%d", reduceTaskId)
+	ofile, _ := os.Create(oname)
+	defer ofile.Close()
+
+	i := 0
+	for i < len(intermediate) {
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := reducef(intermediate[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+
+		i = j
+	}
+	result, _ := InformReduceTaskResult(reduceTaskId, oname)
+	return result
+}
+
+func GetReduceTask() ([]string, int) {
+	args := GetReduceTaskArgs{}
+	reply := GetReduceTaskReply{}
+
+	ok := call("Coordinator.GetReduceTask", &args, &reply)
+	if ok {
+		if len(reply.Filenames) != 0 {
+			fmt.Printf("Got files %v, starting reduce task\n", reply.Filenames)
+			return reply.Filenames, reply.ReduceTaskID
+		} else {
+			fmt.Printf("No files atm\n")
+			return reply.Filenames, reply.ReduceTaskID
+		}
+		//DPrint(reply)
+	}
+
+	DPrint("GetReduceTask call failed!")
+	return reply.Filenames, -1
+}
+
+func InformReduceTaskResult(
+	mapTaskId int,
+	outputFile string,
+) (string, error) {
+	args := InformReduceTaskResultArgs{
+		mapTaskId,
+		outputFile,
+	}
+	reply := InformReduceTaskResultReply{}
+
+	ok := call("Coordinator.InformReduceTaskResult", &args, &reply)
+	if ok {
+		return reply.Action, nil
+	} else {
+		DPrint("InformReduceTaskResult call failed!")
+		return "", nil
+	}
+}
+
+func GetKVFromIntermediateFile(filename string, intermediate *[]KeyValue) {
+
+	file, _ := os.Open(filename)
+	defer file.Close()
+
+	//var kva []KeyValue
+	dec := json.NewDecoder(file)
+	for {
+		var kv KeyValue
+		if err := dec.Decode(&kv); err != nil {
+			break
+		}
+		*intermediate = append(*intermediate, kv)
+	}
+	//return kva
 }
