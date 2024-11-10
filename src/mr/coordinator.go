@@ -1,6 +1,7 @@
 package mr
 
 import "log"
+import "sync"
 import "net"
 import "os"
 import "net/rpc"
@@ -25,6 +26,7 @@ func DPrint(v ...interface{}) (n int, err error) {
 type Coordinator struct {
 	// Your definitions here.
 
+	mutex                sync.Mutex
 	inputSplits          []string
 	nReduce              int
 	pendingMapTasks      map[int]string   // map task's id: input split file name
@@ -39,6 +41,9 @@ type Coordinator struct {
 
 func (c *Coordinator) GetMapTask(args *GetMapTaskArgs, reply *GetMapTaskReply) error {
 
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	currFile, mapTaskId := c.getPendingMapTask()
 
 	reply.Filename = currFile
@@ -49,7 +54,9 @@ func (c *Coordinator) GetMapTask(args *GetMapTaskArgs, reply *GetMapTaskReply) e
 
 func (c *Coordinator) InformMapTaskResult(args *InformMapTaskResultArgs, reply *InformMapTaskResultReply) error {
 
-	// in a mutex
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	for fileName, reduceTaskId := range args.IntermediateFileNames {
 		c.completedMapTasks[args.TaskID] = append(c.completedMapTasks[args.TaskID], fileName)
 		c.pendingReduceTasks[reduceTaskId] = append(c.pendingReduceTasks[reduceTaskId], fileName)
@@ -68,6 +75,9 @@ func (c *Coordinator) InformMapTaskResult(args *InformMapTaskResultArgs, reply *
 
 func (c *Coordinator) GetReduceTask(args *GetReduceTaskArgs, reply *GetReduceTaskReply) error {
 
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	currFiles, reduceTaskId := c.getPendingReduceTask()
 
 	reply.Filenames = currFiles
@@ -77,7 +87,9 @@ func (c *Coordinator) GetReduceTask(args *GetReduceTaskArgs, reply *GetReduceTas
 
 func (c *Coordinator) InformReduceTaskResult(args *InformReduceTaskResultArgs, reply *InformReduceTaskResultReply) error {
 
-	// mutex
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	c.completedReduceTasks[args.TaskID] = args.OutputFilename
 	delete(c.runningReduceTasks, args.TaskID)
 	if c.checkForReduceTask() {
@@ -115,14 +127,14 @@ func (c *Coordinator) server() {
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	return len(c.completedReduceTasks) == c.nReduce
 }
 
 func (c *Coordinator) getPendingMapTask() (string, int) {
 	var currFile string
 	var mapTaskId int
-
-	// should be in mutex lock
 
 	//DPrint("pending map tasks ", c.pendingMapTasks)
 	//DPrint("running map tasks ", c.runningMapTasks)
@@ -162,8 +174,6 @@ func (c *Coordinator) areMapTasksCompleted() bool {
 func (c *Coordinator) getPendingReduceTask() ([]string, int) {
 	var currFiles = make([]string, c.nReduce)
 	var reduceTaskId int
-
-	// mutex again
 
 	if len(c.pendingReduceTasks) > 0 {
 		for id, fileNames := range c.pendingReduceTasks {

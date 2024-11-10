@@ -88,7 +88,9 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	sockname := coordinatorSock()
 	c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
-		log.Fatal("dialing:", err)
+		DPrint("dialing:", err)
+		DPrint("master is offline")
+		os.Exit(1)
 	}
 	defer c.Close()
 
@@ -111,12 +113,29 @@ func MapWorker(mapf func(string, string) []KeyValue, filename string, nReduce in
 	kva := GetIntermediatePairs(mapf, filename)
 
 	intermediateFileNames := make(map[string]int)
+	intermediateTempFiles := make([]*os.File, nReduce)
+	intermediatePrefix := fmt.Sprintf("mr-%d", mapTaskId)
+
 	DPrint("processing ", mapTaskId, " ", filename)
+
+	for idx := 0; idx < nReduce; idx++ {
+		pattern := fmt.Sprintf("%s-%d-*", intermediatePrefix, idx)
+		intermediateTempFiles[idx] = GetTempFile(pattern)
+	}
+
 	for _, kv := range kva {
 		Y := ihash(kv.Key) % nReduce
-		intermediateFilename := fmt.Sprintf("mr-%d-%d", mapTaskId, Y)
-		PutKvInIntermediateFile(kv, intermediateFilename)
+		intermediateFilename := fmt.Sprintf("%s-%d", intermediatePrefix, Y)
+		PutKvInIntermediateFile(kv, intermediateTempFiles[Y])
 		intermediateFileNames[intermediateFilename] = Y
+	}
+
+	for idx := 0; idx < nReduce; idx++ {
+		intermediateFileName := fmt.Sprintf("%s-%d", intermediatePrefix, idx)
+		// check if file exists
+		if _, err := os.Stat(intermediateFileName); err != nil {
+			os.Rename(intermediateTempFiles[idx].Name(), intermediateFileName)
+		}
 	}
 
 	// handle multiple inform retries exponentially later
@@ -131,9 +150,9 @@ func GetMapTask() (string, int, int) {
 	ok := call("Coordinator.GetMapTask", &args, &reply)
 	if ok {
 		if reply.Filename != "" {
-			fmt.Printf("Got file %v, starting map task\n", reply.Filename)
+			DPrintf("Got file %v, starting map task\n", reply.Filename)
 		} else {
-			fmt.Printf("No files atm\n")
+			DPrintf("No files atm\n")
 		}
 		//DPrint(reply)
 		return reply.Filename, reply.NReduce, reply.MapTaskID
@@ -179,8 +198,8 @@ func InformMapTaskResult(
 	}
 }
 
-func PutKvInIntermediateFile(kv KeyValue, file string) {
-	intermediateFile, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+func PutKvInIntermediateFile(kv KeyValue, file *os.File) {
+	intermediateFile, err := os.OpenFile(file.Name(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatal("os.OpenFile", err)
 	}
@@ -189,7 +208,7 @@ func PutKvInIntermediateFile(kv KeyValue, file string) {
 	enc := json.NewEncoder(intermediateFile)
 	err = enc.Encode(&kv)
 	if err != nil {
-		log.Fatalf("cannot encode %v", file)
+		log.Fatalf("cannot encode %v", file.Name())
 	}
 }
 
@@ -210,9 +229,10 @@ func ReduceWorker(reducef func(string, []string) string, fileNames []string, red
 
 	sort.Sort(ByKey(intermediate))
 
-	oname := fmt.Sprintf("mr-out-%d", reduceTaskId)
-	ofile, _ := os.Create(oname)
-	defer ofile.Close()
+	outFileName := fmt.Sprintf("mr-out-%d", reduceTaskId)
+	pattern := fmt.Sprintf("%s-*", outFileName)
+	tempOutFile := GetTempFile(pattern)
+	defer tempOutFile.Close()
 
 	i := 0
 	for i < len(intermediate) {
@@ -227,11 +247,15 @@ func ReduceWorker(reducef func(string, []string) string, fileNames []string, red
 		output := reducef(intermediate[i].Key, values)
 
 		// this is the correct format for each line of Reduce output.
-		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+		fmt.Fprintf(tempOutFile, "%v %v\n", intermediate[i].Key, output)
 
 		i = j
 	}
-	result, _ := InformReduceTaskResult(reduceTaskId, oname)
+	// check if file exists
+	if _, err := os.Stat(outFileName); err != nil {
+		os.Rename(tempOutFile.Name(), outFileName)
+	}
+	result, _ := InformReduceTaskResult(reduceTaskId, outFileName)
 	return result
 }
 
@@ -242,10 +266,10 @@ func GetReduceTask() ([]string, int) {
 	ok := call("Coordinator.GetReduceTask", &args, &reply)
 	if ok {
 		if len(reply.Filenames) != 0 {
-			fmt.Printf("Got files %v, starting reduce task\n", reply.Filenames)
+			DPrintf("Got files %v, starting reduce task\n", reply.Filenames)
 			return reply.Filenames, reply.ReduceTaskID
 		} else {
-			fmt.Printf("No files atm\n")
+			DPrintf("No files atm\n")
 			return reply.Filenames, reply.ReduceTaskID
 		}
 		//DPrint(reply)
@@ -289,4 +313,10 @@ func GetKVFromIntermediateFile(filename string, intermediate *[]KeyValue) {
 		*intermediate = append(*intermediate, kv)
 	}
 	//return kva
+}
+
+func GetTempFile(pattern string) *os.File {
+	pwd, _ := os.Getwd()
+	ofile, _ := os.CreateTemp(pwd, pattern)
+	return ofile
 }
